@@ -27,7 +27,46 @@ public class DeliveryController : AbstractController
     [Authorize(Roles = $"{nameof(UserRole.TrainChief)}, {nameof(UserRole.Administrator)}")]
     public async Task<IActionResult> Create(DeliveryCreateCommand command, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        var request = await DbContext.TrainTrips
+            .SingleOrDefaultAsync(r => r!.Id == command.DeliveryRequestId, cancellationToken);
+        if (request is null)
+        {
+            Logger.LogWarning(
+                "Couldn't find delivery request for {Command}: {ID}}",
+                nameof(DeliveryCreateCommand),
+                command.DeliveryRequestId);
+            return BadRequest();
+        }
+        
+        var trip = await DbContext.TrainTrips
+            .SingleOrDefaultAsync(t => t!.Id == command.TrainTripId, cancellationToken);
+        if (trip is null)
+        {
+            Logger.LogWarning(
+                "Couldn't find trip for {Command}: {ID}}", nameof(DeliveryCreateCommand), command.TrainTripId);
+            return BadRequest();
+        }
+
+        // TODO: Check that keeper is on this train
+
+        var delivery = Mapper.Map<Delivery>(command);
+
+        delivery.Id = Guid.NewGuid();
+        delivery.Status = DeliveryStatus.Opened;
+
+        await DbContext.AddAsync(delivery, cancellationToken);
+        await DbContext.AddAsync(new DeliveryStatusChange
+        {
+            Action = nameof(DeliveryCreateCommand),
+            ActionCallerId = (await CurrentUserProvider.GetCurrentUser(cancellationToken)).Id,
+            DeliveryId = delivery.Id,
+            Id = Guid.NewGuid(),
+            Status = delivery.Status,
+            Timestamp = DateTime.UtcNow
+        }, cancellationToken);
+        await DbContext.SaveChangesAsync(cancellationToken);
+        
+        return CreatedAtAction(nameof(GetSingle), new {id = delivery.Id});
     }
 
     [HttpDelete("id")]
@@ -38,7 +77,26 @@ public class DeliveryController : AbstractController
         $"{nameof(UserRole.Keeper)}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        var target = await DbContext.Deliveries.SingleOrDefaultAsync(d => d!.Id == id, cancellationToken);
+        if (target is null)
+            return NotFound();
+
+        var user = await CurrentUserProvider.GetCurrentUser(cancellationToken);
+
+        switch (target.Status)
+        {
+            case DeliveryStatus.Opened:
+                throw new NotImplementedException();
+            case DeliveryStatus.FirstMile:
+                throw new NotImplementedException();
+            case DeliveryStatus.EnRoute:
+                throw new NotImplementedException();
+            case DeliveryStatus.LastMile:
+            case DeliveryStatus.Delivered:
+            case DeliveryStatus.Closed:
+            default:
+                return StatusCode(StatusCodes.Status405MethodNotAllowed);
+        }
     }
 
     [HttpGet("id")]
@@ -50,7 +108,7 @@ public class DeliveryController : AbstractController
         $"{nameof(UserRole.Keeper)}")]
     public async Task<IActionResult> GetSingle(Guid id, CancellationToken cancellationToken)
     {
-        var result = await DbContext.Parcels
+        var result = await DbContext.Deliveries
             .SingleOrDefaultAsync(d => d.Id == id, cancellationToken);
 
         return result == null ? NotFound() : Ok(result);
@@ -97,8 +155,8 @@ public class DeliveryController : AbstractController
     private IQueryable<Delivery?> Query(Guid userId, AbstractDeliverySetQuery query)
     {
         var dbQuery = query.OnlyMy
-            ? DbContext.Parcels.Where(d => d!.Request.InitiatorId == userId)
-            : DbContext.Parcels;
+            ? DbContext.Deliveries.Where(d => d!.Request.InitiatorId == userId)
+            : DbContext.Deliveries;
 
         dbQuery = query.Direction switch
         {

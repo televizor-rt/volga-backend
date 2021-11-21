@@ -32,7 +32,7 @@ public class VolgaIronHackDbContext : DbContext
     }
 
 
-    public DbSet<Delivery?> Parcels { get; set; }
+    public DbSet<Delivery?> Deliveries { get; set; }
     
     public DbSet<User?> Users { get; set; }
     
